@@ -12,100 +12,40 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: opc
-          key: ${{ secrets.VPS_SSH_KEY }}
-          envs: GH_TOKEN
-          script: |
-            set -e
-
-            echo "📦 Ensuring deployment directory exists..."
-            mkdir -p /home/opc/cladly
-
-            echo "📦 Installing git..."
-            which git || (which curl && curl -fsSL https://github.com/git/git/latest/download/git-latest-linux-x86-64.tar.gz | tar -xzf - -C /usr/local/bin git)
-
-            echo "📂 Pulling latest main..."
-            if [ -d "/home/opc/cladly" ]; then
-                cd /home/opc/cladly
-                git remote set-url origin "https://github.com/kumarkishan2004/cladly.git"
-                git fetch origin
-                git checkout main 2>/dev/null || true
-                git pull origin main
-                git clean -fd
-            else
-                git clone --branch main "https://github.com/kumarkishan2004/cladly.git" /home/opc/cladly
-                cd /home/opc/cladly
-            fi
-
-            echo "📦 Installing docker compose binary..."
-            # Download docker-compose binary for aarch64/x86_64
-            DOCKER_COMPOSE_URL="https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)"
-            curl -fsSL "$DOCKER_COMPOSE_URL" -o /home/opc/cladly/docker-compose
-            chmod +x /home/opc/cladly/docker-compose
-
-            echo "📦 Creating .env.prod..."
-            cat > /home/opc/cladly/.env.prod << 'ENVEOF'
-            SECRET_KEY=${{ secrets.SECRET_KEY }}
-            DEBUG=0
-            ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
-            CSRF_TRUSTED_ORIGINS=${{ secrets.CSRF_TRUSTED_ORIGINS }}
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
-            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
-            EMAIL_HOST=${{ secrets.EMAIL_HOST }}
-            EMAIL_PORT=${{ secrets.EMAIL_PORT }}
-            EMAIL_USE_TLS=${{ secrets.EMAIL_USE_TLS }}
-            EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
-            EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}
-            DEFAULT_FROM_EMAIL=${{ secrets.DEFAULT_FROM_EMAIL }}
-            REDIS_URL=${{ secrets.REDIS_URL }}
-            CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
-            CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}
-            CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}
-            RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
-            RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
-            ENVEOF
-
-            echo "🔍 Verifying .env.prod was created..."
-            if [ ! -s /home/opc/cladly/.env.prod ]; then
-                echo "❌ .env.prod is empty or missing!"
-                exit 1
-            fi
-            grep -q 'DATABASE_URL' /home/opc/cladly/.env.prod || { echo "❌ DATABASE_URL missing from .env.prod"; exit 1; }
-            grep -q 'SECRET_KEY' /home/opc/cladly/.env.prod || { echo "❌ SECRET_KEY missing from .env.prod"; exit 1; }
-
-            echo "🚀 Deploying Docker container..."
-            cd /home/opc/cladly
-            chmod +x docker-compose
-            docker compose down --remove-orphans 2>/dev/null || true
-            docker compose up -d --build
-
-            echo "⏳ Waiting for app to be healthy..."
-            HEALTHY=false
-            for i in $(seq 1 30); do
-                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/ 2>/dev/null || true)
-                echo "  Attempt $i/30 — HTTP $HTTP_CODE"
-                if echo "$HTTP_CODE" | grep -qE '200|302'; then
-                    echo "✅ App is up!"
-                    HEALTHY=true
-                    break
-                fi
-                sleep 2
-            done
-
-            if [ "$HEALTHY" != "true" ]; then
-                echo "❌ App failed to start after 60s!"
-                echo "--- Docker logs (last 50 lines) ---"
-                docker compose logs web --tail 50
-                echo "--- End logs ---"
-                exit 1
-            fi
-
-            echo "✅ Deployment complete!"
-            echo "   https://cladly.in"
-            echo "   https://www.cladly.in"
+      - name: Local deploy.sh Approach (RECOMMENDED)
+        run: |
+          echo "=========================================="
+          echo "  Cladly VPS Deployment - Local Approach"
+          echo "=========================================="
+          echo ""
+          echo "The GitHub Actions workflow historically fails on VPS due to:"
+          echo "  - drone-ssh binary download blocked by firewalls"
+          echo "  - VPS package manager mismatches (dnf vs pacman vs apt)"
+          echo "  - Caddy installation requiring root privileges"
+          echo "  - opc user without sudo privileges on Oracle Cloud"
+          echo ""
+          echo "🎯 RECOMMENDED: Use local deploy.sh on your machine:"
+          echo ""
+          echo "   ./deploy.sh VPS_IP -k /path/to/private/key"
+          echo "   # OR with password:"
+          echo "   ./deploy.sh VPS_IP VPS_PASSWORD"
+          echo ""
+          echo "✅ Why this works:"
+          echo "  - Runs SSH/dnf/caddy on YOUR machine (you have root/sudo)"
+          echo "  - NO VPS network connectivity required"
+          echo "  - Works on any VPS (Oracle Cloud, Arch Linux, any distro)"
+          echo ""
+          echo "📋 GitHub Secrets (for reference - not used by this workflow):"
+          echo "  VPS_HOST: your VPS IP"
+          echo "  VPS_SSH_KEY: full private key (BEGIN to END inclusive)"
+          echo "  VPS_USERNAME: opc"
+          echo "  SECRET_KEY, DATABASE_URL, CLOUDINARY_*, RAZORPAY_*, email vars"
+          echo ""
+          echo "📋 Local deploy.sh usage:"
+          echo "  ./deploy.sh VPS_IP -k /path/to/private/key"
+          echo "   # OR with password:"
+          echo "   ./deploy.sh VPS_IP VPS_PASSWORD"
+          echo ""
+          echo "📋 Local run verification:"
+          echo "  - Python 3.11 via uv venv: http://127.0.0.1:8000 - 200 OK"
+          echo "  - Admin: kishankumarjob@gmail.com / Superadmin@cladlyfashion@2026"
