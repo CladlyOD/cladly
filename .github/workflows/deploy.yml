@@ -18,25 +18,31 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
+          username: root
           key: ${{ secrets.VPS_SSH_KEY }}
           envs: GH_TOKEN
           script: |
             set -e
 
+            echo "📦 Installing git..."
+            apt-get update -qq && apt-get install -y -qq git
+
+            echo "📂 Ensuring deployment directory exists..."
+            mkdir -p /opt/cladly
+
             REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/kumarkishan2004/cladly.git"
 
             echo "📂 Pulling latest main..."
-            if [ -d "/root/cladly" ]; then
-                cd /root/cladly
+            if [ -d "/opt/cladly" ]; then
+                cd /opt/cladly
                 git remote set-url origin "$REPO_URL"
                 git fetch origin
                 git checkout main 2>/dev/null || true
                 git reset --hard origin/main
                 git clean -fd
             else
-                git clone "$REPO_URL" /root/cladly
-                cd /root/cladly
+                git clone "$REPO_URL" /opt/cladly
+                cd /opt/cladly
             fi
 
             # Reset remote to clean URL (don't leave token in git config permanently)
@@ -77,7 +83,7 @@ jobs:
             echo "✅ Caddy configured and started"
 
             echo "🔐 Creating .env.prod..."
-            cat > /root/cladly/.env.prod << 'ENVEOF'
+            cat > /opt/cladly/.env.prod << 'ENVEOF'
             SECRET_KEY=${{ secrets.SECRET_KEY }}
             DEBUG=0
             ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
@@ -99,15 +105,15 @@ jobs:
             ENVEOF
 
             echo "🔍 Verifying .env.prod was created..."
-            if [ ! -s /root/cladly/.env.prod ]; then
+            if [ ! -s /opt/cladly/.env.prod ]; then
                 echo "❌ .env.prod is empty or missing!"
                 exit 1
             fi
-            grep -q 'DATABASE_URL' /root/cladly/.env.prod || { echo "❌ DATABASE_URL missing from .env.prod"; exit 1; }
-            grep -q 'SECRET_KEY' /root/cladly/.env.prod || { echo "❌ SECRET_KEY missing from .env.prod"; exit 1; }
+            grep -q 'DATABASE_URL' /opt/cladly/.env.prod || { echo "❌ DATABASE_URL missing from .env.prod"; exit 1; }
+            grep -q 'SECRET_KEY' /opt/cladly/.env.prod || { echo "❌ SECRET_KEY missing from .env.prod"; exit 1; }
 
             echo "🚀 Rebuilding Docker containers..."
-            cd /root/cladly
+            cd /opt/cladly
             docker compose down --remove-orphans 2>/dev/null || true
             docker compose up -d --build
 
