@@ -18,19 +18,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: root
+          username: opc
           key: ${{ secrets.VPS_SSH_KEY }}
           envs: GH_TOKEN
           script: |
             set -e
 
-            mkdir -p /root/cladly
+            sudo su -c "mkdir -p /root/cladly"
 
             echo "📦 Installing git..."
-            sudo dnf update -qq && sudo dnf install -y -qq git
+            sudo su -c "dnf update -qq && dnf install -y -qq git"
+            sudo su -c "dnf update -qq && dnf install -y -qq debian-keyring debian-archive-keyring apt-transport-https curl"
+            sudo su -c "dnf update -qq && dnf install -y -qq caddy"
 
             echo "📂 Ensuring deployment directory exists..."
-            mkdir -p /root/cladly
+            sudo su -c "mkdir -p /root/cladly"
 
             REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/kumarkishan2004/cladly.git"
 
@@ -67,10 +69,6 @@ jobs:
             echo "🌐 Setting up Caddy..."
             if ! command -v caddy &>/dev/null; then
                 echo "📦 Installing Caddy..."
-                dnf update -qq && dnf install -y -qq debian-keyring debian-archive-keyring apt-transport-https curl
-                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
-                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-                dnf update -qq && dnf install -y -qq caddy
                 echo "✅ Caddy installed"
             fi
 
