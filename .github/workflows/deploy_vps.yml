@@ -1,0 +1,109 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: GH_TOKEN
+          script: |
+            set -e
+
+            echo "📦 Ensuring deployment directory exists..."
+            mkdir -p /root/cladly
+
+            echo "📂 Pulling latest main..."
+            if [ -d "/root/cladly" ]; then
+                cd /root/cladly
+                git remote set-url origin "https://github.com/kumarkishan2004/cladly.git"
+                git fetch origin
+                git checkout main 2>/dev/null || true
+                git pull origin main
+                git clean -fd
+            else
+                git clone --branch main "https://github.com/kumarkishan2004/cladly.git" /root/cladly
+                cd /root/cladly
+            fi
+
+            echo "🔐 Creating .env.prod..."
+            cat > /root/cladly/.env.prod << 'ENVEOF'
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            DEBUG=0
+            ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
+            CSRF_TRUSTED_ORIGINS=${{ secrets.CSRF_TRUSTED_ORIGINS }}
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+            EMAIL_HOST=${{ secrets.EMAIL_HOST }}
+            EMAIL_PORT=${{ secrets.EMAIL_PORT }}
+            EMAIL_USE_TLS=${{ secrets.EMAIL_USE_TLS }}
+            EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
+            EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}
+            DEFAULT_FROM_EMAIL=${{ secrets.DEFAULT_FROM_EMAIL }}
+            REDIS_URL=${{ secrets.REDIS_URL }}
+            CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
+            CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}
+            CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}
+            RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
+            RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
+            ENVEOF
+
+            echo "🔍 Verifying .env.prod was created..."
+            if [ ! -s /root/cladly/.env.prod ]; then
+                echo "❌ .env.prod is empty or missing!"
+                exit 1
+            fi
+            grep -q 'DATABASE_URL' /root/cladly/.env.prod || { echo "❌ DATABASE_URL missing from .env.prod"; exit 1; }
+            grep -q 'SECRET_KEY' /root/cladly/.env.prod || { echo "❌ SECRET_KEY missing from .env.prod"; exit 1; }
+
+            echo "🔧 Configuring Caddy (optional skip if issues)..."
+            if command -v caddy &>/dev/null; then
+                caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+                echo "✅ Caddy reloaded"
+            else
+                echo "⚠️  Caddy not found — skipping Caddy config (manual setup required)"
+            fi
+
+            echo "🚀 Deploying Docker container..."
+            cd /root/cladly
+            docker compose down --remove-orphans 2>/dev/null || true
+            docker compose up -d --build
+
+            echo "⏳ Waiting for app to be healthy..."
+            HEALTHY=false
+            for i in $(seq 1 30); do
+                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/ 2>/dev/null || true)
+                echo "  Attempt $i/30 — HTTP $HTTP_CODE"
+                if echo "$HTTP_CODE" | grep -qE '200|302'; then
+                    echo "✅ App is up!"
+                    HEALTHY=true
+                    break
+                fi
+                sleep 2
+            done
+
+            if [ "$HEALTHY" != "true" ]; then
+                echo "❌ App failed to start after 60s!"
+                echo "--- Docker logs (last 50 lines) ---"
+                docker compose logs web --tail 50
+                echo "--- End logs ---"
+                exit 1
+            fi
+
+            echo "✅ Deployment complete!"
+            echo "   https://cladly.in"
+            echo "   https://www.cladly.in"
