@@ -3,23 +3,51 @@ set -e
 
 # ──────────────────────────────────────────────
 # deploy.sh — Dockerized Cladly deployment to VPS
-# Usage: ./deploy.sh VPS_IP VPS_PASSWORD [GH_TOKEN]
+# Usage: ./deploy.sh VPS_IP [VPS_PASSWORD] [GH_TOKEN] [-k SSH_KEY]
 #
 # Reads secrets from local .env.deploy (gitignored)
 # NEVER commit .env.deploy — it contains production secrets
 #
 # If repo is private, provide a GitHub PAT as 3rd argument:
-#   ./deploy.sh VPS_IP VPS_PASSWORD ghp_xxxxx
+#   ./deploy.sh VPS_IP ghp_xxxxx
+# Deploy with SSH key (Oracle Cloud, etc.):
+#   ./deploy.sh VPS_IP -k /path/to/ssh/private/key
+#   # Or set VPS_SSH_KEY env var pointing to the key file
 # ──────────────────────────────────────────────
 
-if [ $# -lt 2 ]; then
-    echo "Usage: $0 VPS_IP VPS_PASSWORD [GH_TOKEN]"
+if [ $# -lt 1 ]; then
+    echo "Usage: $0 VPS_IP [VPS_PASSWORD] [GH_TOKEN] [-k SSH_KEY]"
     exit 1
 fi
 
 VPS_IP=$1
-VPS_PASSWORD=$2
+VPS_PASSWORD=""
 GH_TOKEN=$3
+SSH_KEY=""
+
+# Parse optional arguments: VPS_PASSWORD, GH_TOKEN, -k SSH_KEY
+shift
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -k)
+            SSH_KEY="$2"
+            shift 2
+            ;;
+        *)
+            if [ -z "$VPS_PASSWORD" ]; then
+                VPS_PASSWORD="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Allow VPS_SSH_KEY env var to override
+if [ -z "$SSH_KEY" ] && [ -n "${VPS_SSH_KEY:-}" ]; then
+    SSH_KEY="$VPS_SSH_KEY"
+fi
+
 ENV_FILE=".env.deploy"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -30,10 +58,20 @@ fi
 
 echo "🔄 Deploying Cladly to $VPS_IP ..."
 
-# ── Prerequisites: install sshpass if missing ──
-if ! command -v sshpass &>/dev/null; then
-    echo "📦 Installing sshpass ..."
-    sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+# ── Determine SSH command ──
+if [ -n "$SSH_KEY" ]; then
+    echo "🔑 Using SSH key authentication..."
+    SSH_OPTS="-o StrictHostKeyChecking=no -i \"$SSH_KEY\""
+    SSH_CMD="ssh $SSH_OPTS"
+else
+    # ── Prerequisites: install sshpass if missing ──
+    if ! command -v sshpass &>/dev/null; then
+        echo "📦 Installing sshpass ..."
+        sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+    fi
+    echo "🔐 Using password authentication..."
+    SSH_OPTS="-o StrictHostKeyChecking=no"
+    SSH_CMD="sshpass -p \"$VPS_PASSWORD\" ssh $SSH_OPTS"
 fi
 
 # ── Read env file and send to VPS ──
@@ -47,7 +85,7 @@ else
 fi
 
 # ── Remote setup ──
-sshpass -p "$VPS_PASSWORD" ssh -o StrictHostKeyChecking=no root@"$VPS_IP" \
+$SSH_CMD root@"$VPS_IP" \
     "$VPS_IP" "$ENV_CONTENTS" "$REPO_URL" << 'REMOTE'
 set -e
 VPS_IP=$1
