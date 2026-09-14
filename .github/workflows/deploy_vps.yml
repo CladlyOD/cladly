@@ -82,6 +82,7 @@ jobs:
             echo "🚀 Deploying Docker container..."
             cd /home/opc/cladly
             chmod +x docker-compose
+            export PATH="/home/opc/cladly:$PATH"
             docker compose down --remove-orphans 2>/dev/null || true
             docker compose up -d --build
 
