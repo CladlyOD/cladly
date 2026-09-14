@@ -13,7 +13,7 @@ set -e
 # Deploy with SSH key (Oracle Cloud, Arch Linux, etc.):
 #   ./deploy.sh VPS_IP -k /path/to/ssh/private/key
 #   # Or set VPS_SSH_KEY env var pointing to the key file
-# Note: This script uses dnf (or pacman) for package management on Arch/RHEL-based VPS.
+# Note: This script uses dnf (or pacman) for package management on Arch/RHEL-based VPS as user 'opc'.
 # The GitHub Actions workflow (.github/workflows/deploy.yml) also uses dnf.
 # ──────────────────────────────────────────────
 
