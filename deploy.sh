@@ -10,9 +10,11 @@ set -e
 #
 # If repo is private, provide a GitHub PAT as 3rd argument:
 #   ./deploy.sh VPS_IP ghp_xxxxx
-# Deploy with SSH key (Oracle Cloud, etc.):
+# Deploy with SSH key (Oracle Cloud, Arch Linux, etc.):
 #   ./deploy.sh VPS_IP -k /path/to/ssh/private/key
 #   # Or set VPS_SSH_KEY env var pointing to the key file
+# Note: This script uses dnf (or pacman) for package management on Arch/RHEL-based VPS.
+# The GitHub Actions workflow (.github/workflows/deploy.yml) also uses dnf.
 # ──────────────────────────────────────────────
 
 if [ $# -lt 1 ]; then
@@ -67,7 +69,7 @@ else
     # ── Prerequisites: install sshpass if missing ──
     if ! command -v sshpass &>/dev/null; then
         echo "📦 Installing sshpass ..."
-        sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+        sudo dnf update -qq && sudo dnf install -y -qq sshpass
     fi
     echo "🔐 Using password authentication..."
     SSH_OPTS="-o StrictHostKeyChecking=no"
@@ -97,7 +99,7 @@ if ! command -v docker &>/dev/null; then
     curl -fsSL https://get.docker.com | sh
 fi
 if ! docker compose version &>/dev/null 2>&1; then
-    apt-get update -qq && apt-get install -y -qq docker-compose-plugin
+    dnf update -qq && dnf install -y -qq docker-compose-plugin
 fi
 
 echo "📂 Cloning / pulling repository ..."
