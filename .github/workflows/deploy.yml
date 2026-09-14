@@ -67,21 +67,21 @@ jobs:
             echo "🌐 Setting up Caddy..."
             if ! command -v caddy &>/dev/null; then
                 echo "📦 Installing Caddy..."
-                dnf update -qq && dnf install -y -qq debian-keyring debian-archive-keyring apt-transport-https curl
-                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
-                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-                dnf update -qq && dnf install -y -qq caddy
+                sudo dnf update -qq && sudo dnf install -y -qq debian-keyring debian-archive-keyring apt-transport-https curl
+                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor | sudo tee /usr/share/keyrings/caddy-stable-archive-keyring.gpg >/dev/null 2>&1
+                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
+                sudo dnf update -qq && sudo dnf install -y -qq caddy
                 echo "✅ Caddy installed"
             fi
 
-            cat > /etc/caddy/Caddyfile << 'CADDYEOF'
+            sudo tee /etc/caddy/Caddyfile > /dev/null << 'CADDYEOF'
             cladly.in, www.cladly.in {
                 reverse_proxy localhost:8000
             }
             CADDYEOF
 
-            systemctl enable caddy 2>/dev/null || true
-            systemctl restart caddy 2>/dev/null || caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+            sudo systemctl enable caddy 2>/dev/null || true
+            sudo systemctl restart caddy 2>/dev/null || sudo caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
             echo "✅ Caddy configured and started"
 
             echo "🔐 Creating .env.prod..."
@@ -142,7 +142,7 @@ jobs:
 
             echo "🔧 Reloading Caddy..."
             if command -v caddy &>/dev/null; then
-                caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+                sudo caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
                 echo "✅ Caddy reloaded"
             else
                 echo "⚠️  Caddy not found — skipping"
