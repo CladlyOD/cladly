@@ -27,12 +27,8 @@ jobs:
             echo "📦 Ensuring deployment directory exists..."
             mkdir -p /home/opc/cladly
 
-            echo "📦 Installing git and docker compose..."
-            # For Arch Linux (based on omarchy/omarchy kernel)
-            sudo pacman -Syu --noconfirm git docker-compose || \
-            # Fallback for other systems
-            sudo dnf install -y -q git docker-compose || \
-            sudo apt-get install -y -q git docker-compose
+            echo "📦 Installing git..."
+            which git || (which curl && curl -fsSL https://github.com/git/git/latest/download/git-latest-linux-x86-64.tar.gz | tar -xzf - -C /usr/local/bin git)
 
             echo "📂 Pulling latest main..."
             if [ -d "/home/opc/cladly" ]; then
@@ -47,7 +43,13 @@ jobs:
                 cd /home/opc/cladly
             fi
 
-            echo "🔐 Creating .env.prod..."
+            echo "📦 Installing docker compose binary..."
+            # Download docker-compose binary for aarch64/x86_64
+            DOCKER_COMPOSE_URL="https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)"
+            curl -fsSL "$DOCKER_COMPOSE_URL" -o /home/opc/cladly/docker-compose
+            chmod +x /home/opc/cladly/docker-compose
+
+            echo "📦 Creating .env.prod..."
             cat > /home/opc/cladly/.env.prod << 'ENVEOF'
             SECRET_KEY=${{ secrets.SECRET_KEY }}
             DEBUG=0
@@ -79,6 +81,7 @@ jobs:
 
             echo "🚀 Deploying Docker container..."
             cd /home/opc/cladly
+            chmod +x docker-compose
             docker compose down --remove-orphans 2>/dev/null || true
             docker compose up -d --build
 
