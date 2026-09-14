@@ -27,6 +27,10 @@ jobs:
             echo "📦 Ensuring deployment directory exists..."
             mkdir -p /home/opc/cladly
 
+            echo "📦 Installing git and docker compose..."
+            sudo su -c "dnf update -qq && dnf install -y -qq git docker-compose-plugin" || \
+            sudo su -c "pacman -Syu --noconfirm git docker-compose"
+
             echo "📂 Pulling latest main..."
             if [ -d "/home/opc/cladly" ]; then
                 cd /home/opc/cladly
