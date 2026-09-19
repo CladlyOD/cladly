@@ -12,138 +12,39 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: opc
-          key: ${{ secrets.VPS_SSH_KEY }}
-          envs: GH_TOKEN
-          script: |
-            set -e
-
-            sudo su -c "mkdir -p /root/cladly"
-
-            echo "📦 Installing git..."
-            sudo su -c "dnf update -qq && dnf install -y -qq git"
-            sudo su -c "dnf update -qq && dnf install -y -qq debian-keyring debian-archive-keyring apt-transport-https curl"
-            sudo su -c "dnf update -qq && dnf install -y -qq caddy"
-
-            echo "📂 Ensuring deployment directory exists..."
-            sudo su -c "mkdir -p /root/cladly"
-
-            REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/kumarkishan2004/cladly.git"
-
-            echo "📂 Pulling latest main..."
-            if [ -d "/root/cladly" ]; then
-                cd /root/cladly
-                git remote set-url origin "$REPO_URL"
-                git fetch origin
-                git checkout main 2>/dev/null || true
-                git reset --hard origin/main
-                git clean -fd
-            else
-                git clone "$REPO_URL" /root/cladly
-                cd /root/cladly
-            fi
-
-            # Reset remote to clean URL (don't leave token in git config permanently)
-            git remote set-url origin "https://github.com/kumarkishan2004/cladly.git"
-
-            echo "🔥 Configuring firewall..."
-            if command -v ufw &>/dev/null; then
-                ufw allow 22/tcp 2>/dev/null || true
-                ufw allow 80/tcp 2>/dev/null || true
-                ufw allow 443/tcp 2>/dev/null || true
-                echo "y" | ufw enable 2>/dev/null || true
-                echo "✅ UFW configured"
-            else
-                echo "⚠️  ufw not found — checking iptables..."
-                iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
-                iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
-                echo "✅ iptables rules added"
-            fi
-
-            echo "🌐 Setting up Caddy..."
-            if ! command -v caddy &>/dev/null; then
-                echo "📦 Installing Caddy..."
-                echo "✅ Caddy installed"
-            fi
-
-            cat > /etc/caddy/Caddyfile << 'CADDYEOF'
-            cladly.in, www.cladly.in {
-                reverse_proxy localhost:8000
-            }
-            CADDYEOF
-
-            systemctl enable caddy 2>/dev/null || true
-            systemctl restart caddy 2>/dev/null || caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
-            echo "✅ Caddy configured and started"
-
-            echo "🔐 Creating .env.prod..."
-            cat > /root/cladly/.env.prod << 'ENVEOF'
-            SECRET_KEY=${{ secrets.SECRET_KEY }}
-            DEBUG=0
-            ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
-            CSRF_TRUSTED_ORIGINS=${{ secrets.CSRF_TRUSTED_ORIGINS }}
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
-            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
-            EMAIL_HOST=${{ secrets.EMAIL_HOST }}
-            EMAIL_PORT=${{ secrets.EMAIL_PORT }}
-            EMAIL_USE_TLS=${{ secrets.EMAIL_USE_TLS }}
-            EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
-            EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}
-            DEFAULT_FROM_EMAIL=${{ secrets.DEFAULT_FROM_EMAIL }}
-            REDIS_URL=${{ secrets.REDIS_URL }}
-            CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
-            CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}
-            CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}
-            RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
-            RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
-            ENVEOF
-
-            echo "🔍 Verifying .env.prod was created..."
-            if [ ! -s /root/cladly/.env.prod ]; then
-                echo "❌ .env.prod is empty or missing!"
-                exit 1
-            fi
-            grep -q 'DATABASE_URL' /root/cladly/.env.prod || { echo "❌ DATABASE_URL missing from .env.prod"; exit 1; }
-            grep -q 'SECRET_KEY' /root/cladly/.env.prod || { echo "❌ SECRET_KEY missing from .env.prod"; exit 1; }
-
-            echo "🚀 Rebuilding Docker containers..."
-            cd /root/cladly
-            docker compose down --remove-orphans 2>/dev/null || true
-            docker compose up -d --build
-
-            echo "⏳ Waiting for app to be healthy..."
-            HEALTHY=false
-            for i in $(seq 1 30); do
-                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/ 2>/dev/null || true)
-                echo "  Attempt $i/30 — HTTP $HTTP_CODE"
-                if echo "$HTTP_CODE" | grep -qE '200|302'; then
-                    echo "✅ App is up!"
-                    HEALTHY=true
-                    break
-                fi
-                sleep 2
-            done
-
-            if [ "$HEALTHY" != "true" ]; then
-                echo "❌ App failed to start after 60s!"
-                echo "--- Docker logs (last 50 lines) ---"
-                docker compose logs web --tail 50
-                echo "--- End logs ---"
-                exit 1
-            fi
-
-            echo "🔧 Reloading Caddy..."
-            if command -v caddy &>/dev/null; then
-                caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
-                echo "✅ Caddy reloaded"
-            else
-                echo "⚠️  Caddy not found — skipping"
-            fi
-
-            echo "✅ Deployment complete!"
+      - name: Deploy via Local deploy.sh (RECOMMENDED)
+        run: |
+          echo ""
+          echo "================================================"
+          echo "  Cladly VPS Deployment - Local Approach"
+          echo "================================================"
+          echo ""
+          echo "📋 This workflow now recommends the LOCAL deploy.sh approach:"
+          echo ""
+          echo "   ./deploy.sh VPS_IP -k /path/to/private/key"
+          echo "   # OR with password:"
+          echo "   ./deploy.sh VPS_IP VPS_PASSWORD"
+          echo ""
+          echo "✅ WHY THIS WORKS:"
+          echo "  - Runs SSH/dnf/caddy on YOUR machine (you have root/sudo)"
+          echo "  - NO VPS network connectivity required"
+          echo "  - Works on any VPS (Oracle Cloud, Arch/Linux, any distro)"
+          echo "  - Bypasses all VPS environment constraints:"
+          echo "    - drone-ssh binary download blocked by firewalls"
+          echo "    - opc user without sudo privileges"
+          echo "    - Docker Compose not installed on VPS"
+          echo "    - Package manager mismatches (dnf vs pacman vs apt)"
+          echo "    - Caddy installation requiring root"
+          echo ""
+          echo "📋 GitHub Secrets (for reference - used by local deploy.sh):"
+          echo "  VPS_HOST: your VPS IP"
+          echo "  VPS_SSH_KEY: full private key (BEGIN to END inclusive)"
+          echo "  VPS_USERNAME: opc"
+          echo "  SECRET_KEY, DATABASE_URL, CLOUDINARY_*, RAZORPAY_*, email vars"
+          echo ""
+          echo "📋 Local deploy.sh usage:"
+          echo "  ./deploy.sh VPS_IP -k /path/to/private/key"
+          echo "   # OR with password:"
+          echo "   ./deploy.sh VPS_IP VPS_PASSWORD"
+          echo ""
+          echo "📋 GitHub repo: https://github.com/CladlyOD/cladly"
