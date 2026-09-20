@@ -1,89 +1,90 @@
-name: Deploy to VPS
+name: Deploy to Production
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  deploy:
+  test:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Django system checks
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SECRET_KEY: test-key-for-ci
+          DEBUG: 1
+          DATABASE_URL: sqlite:///tmp/test.db
+          REDIS_URL: ""
+          CLOUDINARY_CLOUD_NAME: test
+          CLOUDINARY_API_KEY: test
+          CLOUDINARY_API_SECRET: test
+        run: |
+          python manage.py check --deploy --fail-level WARNING
+
+      - name: Test migrations
+        env:
+          SECRET_KEY: test-key-for-ci
+          DEBUG: 1
+          DATABASE_URL: sqlite:///tmp/test.db
+          REDIS_URL: ""
+          CLOUDINARY_CLOUD_NAME: test
+          CLOUDINARY_API_KEY: test
+          CLOUDINARY_API_SECRET: test
+        run: |
+          python manage.py migrate --run-syncdb --check
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Oracle VM via SSH
+        uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
           username: opc
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: GH_TOKEN
           script: |
             set -e
 
-            sudo su -c "mkdir -p /root/cladly"
+            DEPLOY_DIR="/home/opc/cladly"
+            REPO_URL="https://github.com/CladlyOD/cladly.git"
 
-            echo "📦 Installing git..."
-            sudo su -c "dnf update -qq && dnf install -y -qq git"
-            sudo su -c "dnf update -qq && dnf install -y -qq debian-keyring debian-archive-keyring apt-transport-https curl"
-            sudo su -c "dnf update -qq && dnf install -y -qq caddy"
+            echo "=== Cladly Deployment ==="
+            echo "Time: $(date)"
+            echo ""
 
-            echo "📂 Ensuring deployment directory exists..."
-            sudo su -c "mkdir -p /root/cladly"
-
-            REPO_URL="https://x-access-token:${GH_TOKEN}@github.com/kumarkishan2004/cladly.git"
-
-            echo "📂 Pulling latest main..."
-            if [ -d "/root/cladly" ]; then
-                cd /root/cladly
-                git remote set-url origin "$REPO_URL"
+            # Clone or pull the repo
+            echo "1. Updating code..."
+            if [ -d "$DEPLOY_DIR" ]; then
+                cd "$DEPLOY_DIR"
                 git fetch origin
-                git checkout main 2>/dev/null || true
                 git reset --hard origin/main
                 git clean -fd
             else
-                git clone "$REPO_URL" /root/cladly
-                cd /root/cladly
+                git clone --branch main "$REPO_URL" "$DEPLOY_DIR"
+                cd "$DEPLOY_DIR"
             fi
 
-            # Reset remote to clean URL (don't leave token in git config permanently)
-            git remote set-url origin "https://github.com/kumarkishan2004/cladly.git"
-
-            echo "🔥 Configuring firewall..."
-            if command -v ufw &>/dev/null; then
-                ufw allow 22/tcp 2>/dev/null || true
-                ufw allow 80/tcp 2>/dev/null || true
-                ufw allow 443/tcp 2>/dev/null || true
-                echo "y" | ufw enable 2>/dev/null || true
-                echo "✅ UFW configured"
-            else
-                echo "⚠️  ufw not found — checking iptables..."
-                iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
-                iptables -C INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
-                echo "✅ iptables rules added"
-            fi
-
-            echo "🌐 Setting up Caddy..."
-            if ! command -v caddy &>/dev/null; then
-                echo "📦 Installing Caddy..."
-                echo "✅ Caddy installed"
-            fi
-
-            cat > /etc/caddy/Caddyfile << 'CADDYEOF'
-            cladly.in, www.cladly.in {
-                reverse_proxy localhost:8000
-            }
-            CADDYEOF
-
-            systemctl enable caddy 2>/dev/null || true
-            systemctl restart caddy 2>/dev/null || caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
-            echo "✅ Caddy configured and started"
-
-            echo "🔐 Creating .env.prod..."
-            cat > /root/cladly/.env.prod << 'ENVEOF'
+            # Create .env.prod from secrets
+            echo "2. Creating environment file..."
+            cat > "$DEPLOY_DIR/.env.prod" << 'ENVEOF'
             SECRET_KEY=${{ secrets.SECRET_KEY }}
             DEBUG=0
             ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
@@ -104,46 +105,105 @@ jobs:
             RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
             ENVEOF
 
-            echo "🔍 Verifying .env.prod was created..."
-            if [ ! -s /root/cladly/.env.prod ]; then
-                echo "❌ .env.prod is empty or missing!"
+            # Verify env file
+            if [ ! -s "$DEPLOY_DIR/.env.prod" ]; then
+                echo "ERROR: .env.prod is empty!"
                 exit 1
             fi
-            grep -q 'DATABASE_URL' /root/cladly/.env.prod || { echo "❌ DATABASE_URL missing from .env.prod"; exit 1; }
-            grep -q 'SECRET_KEY' /root/cladly/.env.prod || { echo "❌ SECRET_KEY missing from .env.prod"; exit 1; }
+            grep -q 'DATABASE_URL' "$DEPLOY_DIR/.env.prod" || { echo "ERROR: DATABASE_URL missing"; exit 1; }
+            grep -q 'SECRET_KEY' "$DEPLOY_DIR/.env.prod" || { echo "ERROR: SECRET_KEY missing"; exit 1; }
 
-            echo "🚀 Rebuilding Docker containers..."
-            cd /root/cladly
-            docker compose down --remove-orphans 2>/dev/null || true
-            docker compose up -d --build
+            # Build and run Docker containers
+            echo "3. Building Docker image..."
+            cd "$DEPLOY_DIR"
+            docker compose -f docker-compose.yml down --remove-orphans 2>/dev/null || true
+            docker compose -f docker-compose.yml up -d --build
 
-            echo "⏳ Waiting for app to be healthy..."
+            # Wait for app to be healthy
+            echo "4. Waiting for app to start..."
             HEALTHY=false
             for i in $(seq 1 30); do
                 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/ 2>/dev/null || true)
-                echo "  Attempt $i/30 — HTTP $HTTP_CODE"
                 if echo "$HTTP_CODE" | grep -qE '200|302'; then
-                    echo "✅ App is up!"
+                    echo "   App is healthy! (HTTP $HTTP_CODE)"
                     HEALTHY=true
                     break
                 fi
+                echo "   Waiting... (attempt $i/30, HTTP $HTTP_CODE)"
                 sleep 2
             done
 
             if [ "$HEALTHY" != "true" ]; then
-                echo "❌ App failed to start after 60s!"
-                echo "--- Docker logs (last 50 lines) ---"
-                docker compose logs web --tail 50
-                echo "--- End logs ---"
+                echo "ERROR: App failed to start!"
+                docker compose -f docker-compose.yml logs web --tail 50
                 exit 1
             fi
 
-            echo "🔧 Reloading Caddy..."
+            # Reload Caddy
+            echo "5. Reloading Caddy..."
             if command -v caddy &>/dev/null; then
-                caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
-                echo "✅ Caddy reloaded"
-            else
-                echo "⚠️  Caddy not found — skipping"
+                sudo caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+                echo "   Caddy reloaded"
             fi
 
-            echo "✅ Deployment complete!"
+            echo ""
+            echo "=== Deployment Complete ==="
+            echo "Site: https://cladly.in"
+            echo "Time: $(date)"
+
+      - name: Send deployment notification
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.EMAIL_HOST }}
+          server_port: ${{ secrets.EMAIL_PORT }}
+          username: ${{ secrets.EMAIL_HOST_USER }}
+          password: ${{ secrets.EMAIL_HOST_PASSWORD }}
+          subject: "✅ Cladly Deployed Successfully - PR #${{ github.event.pull_request.number }}"
+          to: kishankumarjob@gmail.com
+          from: ${{ secrets.DEFAULT_FROM_EMAIL }}
+          body: |
+            Hi,
+
+            Cladly has been deployed successfully!
+
+            PR Details:
+            - Title: ${{ github.event.pull_request.title }}
+            - Number: #${{ github.event.pull_request.number }}
+            - Merged by: ${{ github.event.pull_request.merged_by.login }}
+
+            Deployment Details:
+            - Status: ✅ Success
+            - Site URL: https://cladly.in
+            - Deployed at: ${{ github.event.pull_request.merged_at }}
+
+            The site is now live and accessible.
+
+            Regards,
+            Cladly CI/CD
+
+      - name: Send failure notification
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.EMAIL_HOST }}
+          server_port: ${{ secrets.EMAIL_PORT }}
+          username: ${{ secrets.EMAIL_HOST_USER }}
+          password: ${{ secrets.EMAIL_HOST_PASSWORD }}
+          subject: "❌ Cladly Deployment Failed - PR #${{ github.event.pull_request.number }}"
+          to: kishankumarjob@gmail.com
+          from: ${{ secrets.DEFAULT_FROM_EMAIL }}
+          body: |
+            Hi,
+
+            Cladly deployment has failed!
+
+            PR Details:
+            - Title: ${{ github.event.pull_request.title }}
+            - Number: #${{ github.event.pull_request.number }}
+
+            Please check the GitHub Actions logs for details.
+            Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Regards,
+            Cladly CI/CD
