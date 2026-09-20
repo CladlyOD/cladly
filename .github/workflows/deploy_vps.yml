@@ -83,6 +83,17 @@ jobs:
             cd /home/opc/cladly
             chmod +x docker-compose
             export PATH="/home/opc/cladly:$PATH"
+            if ! docker info >/dev/null 2>&1; then
+                echo "⚙️ Docker API unavailable, starting Podman API service..."
+                export DOCKER_HOST="unix:///run/user/$(id -u)/podman/podman.sock"
+                podman system service --time=0 "${DOCKER_HOST#unix://}" >/tmp/podman-system-service.log 2>&1 &
+                sleep 2
+            fi
+            docker info >/dev/null 2>&1 || {
+                echo "❌ Failed to connect to container API."
+                [ -f /tmp/podman-system-service.log ] && tail -n 50 /tmp/podman-system-service.log
+                exit 1
+            }
             docker compose down --remove-orphans 2>/dev/null || true
             docker compose up -d --build
 
