@@ -1,50 +1,209 @@
-name: Deploy to VPS
+name: Deploy to Production
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  deploy:
+  test:
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via Local deploy.sh (RECOMMENDED)
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
         run: |
-          echo ""
-          echo "================================================"
-          echo "  Cladly VPS Deployment - Local Approach"
-          echo "================================================"
-          echo ""
-          echo "📋 This workflow now recommends the LOCAL deploy.sh approach:"
-          echo ""
-          echo "   ./deploy.sh VPS_IP -k /path/to/private/key"
-          echo "   # OR with password:"
-          echo "   ./deploy.sh VPS_IP VPS_PASSWORD"
-          echo ""
-          echo "✅ WHY THIS WORKS:"
-          echo "  - Runs SSH/dnf/caddy on YOUR machine (you have root/sudo)"
-          echo "  - NO VPS network connectivity required"
-          echo "  - Works on any VPS (Oracle Cloud, Arch/Linux, any distro)"
-          echo "  - Bypasses all VPS environment constraints:"
-          echo "    - drone-ssh binary download blocked by firewalls"
-          echo "    - opc user without sudo privileges"
-          echo "    - Docker Compose not installed on VPS"
-          echo "    - Package manager mismatches (dnf vs pacman vs apt)"
-          echo "    - Caddy installation requiring root"
-          echo ""
-          echo "📋 GitHub Secrets (for reference - used by local deploy.sh):"
-          echo "  VPS_HOST: your VPS IP"
-          echo "  VPS_SSH_KEY: full private key (BEGIN to END inclusive)"
-          echo "  VPS_USERNAME: opc"
-          echo "  SECRET_KEY, DATABASE_URL, CLOUDINARY_*, RAZORPAY_*, email vars"
-          echo ""
-          echo "📋 Local deploy.sh usage:"
-          echo "  ./deploy.sh VPS_IP -k /path/to/private/key"
-          echo "   # OR with password:"
-          echo "   ./deploy.sh VPS_IP VPS_PASSWORD"
-          echo ""
-          echo "📋 GitHub repo: https://github.com/CladlyOD/cladly"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Django system checks
+        env:
+          SECRET_KEY: test-key-for-ci
+          DEBUG: 1
+          DATABASE_URL: sqlite:///tmp/test.db
+          REDIS_URL: ""
+          CLOUDINARY_CLOUD_NAME: test
+          CLOUDINARY_API_KEY: test
+          CLOUDINARY_API_SECRET: test
+        run: |
+          python manage.py check --deploy --fail-level WARNING
+
+      - name: Test migrations
+        env:
+          SECRET_KEY: test-key-for-ci
+          DEBUG: 1
+          DATABASE_URL: sqlite:///tmp/test.db
+          REDIS_URL: ""
+          CLOUDINARY_CLOUD_NAME: test
+          CLOUDINARY_API_KEY: test
+          CLOUDINARY_API_SECRET: test
+        run: |
+          python manage.py migrate --run-syncdb --check
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Oracle VM via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: opc
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+
+            DEPLOY_DIR="/home/opc/cladly"
+            REPO_URL="https://github.com/CladlyOD/cladly.git"
+
+            echo "=== Cladly Deployment ==="
+            echo "Time: $(date)"
+            echo ""
+
+            # Clone or pull the repo
+            echo "1. Updating code..."
+            if [ -d "$DEPLOY_DIR" ]; then
+                cd "$DEPLOY_DIR"
+                git fetch origin
+                git reset --hard origin/main
+                git clean -fd
+            else
+                git clone --branch main "$REPO_URL" "$DEPLOY_DIR"
+                cd "$DEPLOY_DIR"
+            fi
+
+            # Create .env.prod from secrets
+            echo "2. Creating environment file..."
+            cat > "$DEPLOY_DIR/.env.prod" << 'ENVEOF'
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            DEBUG=0
+            ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
+            CSRF_TRUSTED_ORIGINS=${{ secrets.CSRF_TRUSTED_ORIGINS }}
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+            EMAIL_HOST=${{ secrets.EMAIL_HOST }}
+            EMAIL_PORT=${{ secrets.EMAIL_PORT }}
+            EMAIL_USE_TLS=${{ secrets.EMAIL_USE_TLS }}
+            EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
+            EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}
+            DEFAULT_FROM_EMAIL=${{ secrets.DEFAULT_FROM_EMAIL }}
+            REDIS_URL=${{ secrets.REDIS_URL }}
+            CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
+            CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}
+            CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}
+            RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
+            RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
+            ENVEOF
+
+            # Verify env file
+            if [ ! -s "$DEPLOY_DIR/.env.prod" ]; then
+                echo "ERROR: .env.prod is empty!"
+                exit 1
+            fi
+            grep -q 'DATABASE_URL' "$DEPLOY_DIR/.env.prod" || { echo "ERROR: DATABASE_URL missing"; exit 1; }
+            grep -q 'SECRET_KEY' "$DEPLOY_DIR/.env.prod" || { echo "ERROR: SECRET_KEY missing"; exit 1; }
+
+            # Build and run Docker containers
+            echo "3. Building Docker image..."
+            cd "$DEPLOY_DIR"
+            docker compose -f docker-compose.yml down --remove-orphans 2>/dev/null || true
+            docker compose -f docker-compose.yml up -d --build
+
+            # Wait for app to be healthy
+            echo "4. Waiting for app to start..."
+            HEALTHY=false
+            for i in $(seq 1 30); do
+                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/ 2>/dev/null || true)
+                if echo "$HTTP_CODE" | grep -qE '200|302'; then
+                    echo "   App is healthy! (HTTP $HTTP_CODE)"
+                    HEALTHY=true
+                    break
+                fi
+                echo "   Waiting... (attempt $i/30, HTTP $HTTP_CODE)"
+                sleep 2
+            done
+
+            if [ "$HEALTHY" != "true" ]; then
+                echo "ERROR: App failed to start!"
+                docker compose -f docker-compose.yml logs web --tail 50
+                exit 1
+            fi
+
+            # Reload Caddy
+            echo "5. Reloading Caddy..."
+            if command -v caddy &>/dev/null; then
+                sudo caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+                echo "   Caddy reloaded"
+            fi
+
+            echo ""
+            echo "=== Deployment Complete ==="
+            echo "Site: https://cladly.in"
+            echo "Time: $(date)"
+
+      - name: Send deployment notification
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.EMAIL_HOST }}
+          server_port: ${{ secrets.EMAIL_PORT }}
+          username: ${{ secrets.EMAIL_HOST_USER }}
+          password: ${{ secrets.EMAIL_HOST_PASSWORD }}
+          subject: "✅ Cladly Deployed Successfully - PR #${{ github.event.pull_request.number }}"
+          to: kishankumarjob@gmail.com
+          from: ${{ secrets.DEFAULT_FROM_EMAIL }}
+          body: |
+            Hi,
+
+            Cladly has been deployed successfully!
+
+            PR Details:
+            - Title: ${{ github.event.pull_request.title }}
+            - Number: #${{ github.event.pull_request.number }}
+            - Merged by: ${{ github.event.pull_request.merged_by.login }}
+
+            Deployment Details:
+            - Status: ✅ Success
+            - Site URL: https://cladly.in
+            - Deployed at: ${{ github.event.pull_request.merged_at }}
+
+            The site is now live and accessible.
+
+            Regards,
+            Cladly CI/CD
+
+      - name: Send failure notification
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.EMAIL_HOST }}
+          server_port: ${{ secrets.EMAIL_PORT }}
+          username: ${{ secrets.EMAIL_HOST_USER }}
+          password: ${{ secrets.EMAIL_HOST_PASSWORD }}
+          subject: "❌ Cladly Deployment Failed - PR #${{ github.event.pull_request.number }}"
+          to: kishankumarjob@gmail.com
+          from: ${{ secrets.DEFAULT_FROM_EMAIL }}
+          body: |
+            Hi,
+
+            Cladly deployment has failed!
+
+            PR Details:
+            - Title: ${{ github.event.pull_request.title }}
+            - Number: #${{ github.event.pull_request.number }}
+
+            Please check the GitHub Actions logs for details.
+            Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Regards,
+            Cladly CI/CD
