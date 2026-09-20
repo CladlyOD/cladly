@@ -11,3 +11,18 @@ local_data_dump.json
 staticfiles/
 *.log
 *.md
+
+# Environment files (secrets)
+.env
+.env.*
+!.env.deploy.example
+
+# Docker compose files
+docker-compose*.yml
+
+# IDE
+.vscode/
+.idea/
+
+# Data exports
+data_export*.json
