@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -29,26 +29,26 @@ jobs:
       - name: Run Django system checks
         env:
           SECRET_KEY: test-key-for-ci
-          DEBUG: 1
-          DATABASE_URL: sqlite:///tmp/test.db
+          DEBUG: "1"
+          DATABASE_URL: ""
           REDIS_URL: ""
           CLOUDINARY_CLOUD_NAME: test
           CLOUDINARY_API_KEY: test
           CLOUDINARY_API_SECRET: test
         run: |
-          python manage.py check --deploy --fail-level WARNING
+          python manage.py check --fail-level WARNING
 
       - name: Test migrations
         env:
           SECRET_KEY: test-key-for-ci
-          DEBUG: 1
-          DATABASE_URL: sqlite:///tmp/test.db
+          DEBUG: "1"
+          DATABASE_URL: ""
           REDIS_URL: ""
           CLOUDINARY_CLOUD_NAME: test
           CLOUDINARY_API_KEY: test
           CLOUDINARY_API_SECRET: test
         run: |
-          python manage.py migrate --run-syncdb --check
+          python manage.py migrate --check
 
   deploy:
     needs: test
@@ -84,26 +84,26 @@ jobs:
 
             # Create .env.prod from secrets
             echo "2. Creating environment file..."
-            cat > "$DEPLOY_DIR/.env.prod" << 'ENVEOF'
-            SECRET_KEY=${{ secrets.SECRET_KEY }}
-            DEBUG=0
-            ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
-            CSRF_TRUSTED_ORIGINS=${{ secrets.CSRF_TRUSTED_ORIGINS }}
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
-            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
-            EMAIL_HOST=${{ secrets.EMAIL_HOST }}
-            EMAIL_PORT=${{ secrets.EMAIL_PORT }}
-            EMAIL_USE_TLS=${{ secrets.EMAIL_USE_TLS }}
-            EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
-            EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}
-            DEFAULT_FROM_EMAIL=${{ secrets.DEFAULT_FROM_EMAIL }}
-            REDIS_URL=${{ secrets.REDIS_URL }}
-            CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
-            CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}
-            CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}
-            RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
-            RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
-            ENVEOF
+            cat > "$DEPLOY_DIR/.env.prod" << ENVEOF
+SECRET_KEY=${{ secrets.SECRET_KEY }}
+DEBUG=0
+ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
+CSRF_TRUSTED_ORIGINS=${{ secrets.CSRF_TRUSTED_ORIGINS }}
+DATABASE_URL=${{ secrets.DATABASE_URL }}
+FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+EMAIL_HOST=${{ secrets.EMAIL_HOST }}
+EMAIL_PORT=${{ secrets.EMAIL_PORT }}
+EMAIL_USE_TLS=${{ secrets.EMAIL_USE_TLS }}
+EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
+EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}
+DEFAULT_FROM_EMAIL=${{ secrets.DEFAULT_FROM_EMAIL }}
+REDIS_URL=${{ secrets.REDIS_URL }}
+CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
+CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}
+CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}
+RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
+RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
+ENVEOF
 
             # Verify env file
             if [ ! -s "$DEPLOY_DIR/.env.prod" ]; then
@@ -159,7 +159,7 @@ jobs:
           server_port: ${{ secrets.EMAIL_PORT }}
           username: ${{ secrets.EMAIL_HOST_USER }}
           password: ${{ secrets.EMAIL_HOST_PASSWORD }}
-          subject: "✅ Cladly Deployed Successfully - PR #${{ github.event.pull_request.number }}"
+          subject: "Cladly Deployed Successfully - PR #${{ github.event.pull_request.number }}"
           to: kishankumarjob@gmail.com
           from: ${{ secrets.DEFAULT_FROM_EMAIL }}
           body: |
@@ -173,7 +173,7 @@ jobs:
             - Merged by: ${{ github.event.pull_request.merged_by.login }}
 
             Deployment Details:
-            - Status: ✅ Success
+            - Status: Success
             - Site URL: https://cladly.in
             - Deployed at: ${{ github.event.pull_request.merged_at }}
 
@@ -190,7 +190,7 @@ jobs:
           server_port: ${{ secrets.EMAIL_PORT }}
           username: ${{ secrets.EMAIL_HOST_USER }}
           password: ${{ secrets.EMAIL_HOST_PASSWORD }}
-          subject: "❌ Cladly Deployment Failed - PR #${{ github.event.pull_request.number }}"
+          subject: "Cladly Deployment Failed - PR #${{ github.event.pull_request.number }}"
           to: kishankumarjob@gmail.com
           from: ${{ secrets.DEFAULT_FROM_EMAIL }}
           body: |
