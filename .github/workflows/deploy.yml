@@ -82,28 +82,28 @@ jobs:
                 cd "$DEPLOY_DIR"
             fi
 
-            # Create .env.prod from secrets
+            # Create .env.prod from secrets using printf
             echo "2. Creating environment file..."
-            cat > "$DEPLOY_DIR/.env.prod" << ENVEOF
-SECRET_KEY=${{ secrets.SECRET_KEY }}
-DEBUG=0
-ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}
-CSRF_TRUSTED_ORIGINS=${{ secrets.CSRF_TRUSTED_ORIGINS }}
-DATABASE_URL=${{ secrets.DATABASE_URL }}
-FRONTEND_URL=${{ secrets.FRONTEND_URL }}
-EMAIL_HOST=${{ secrets.EMAIL_HOST }}
-EMAIL_PORT=${{ secrets.EMAIL_PORT }}
-EMAIL_USE_TLS=${{ secrets.EMAIL_USE_TLS }}
-EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}
-EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}
-DEFAULT_FROM_EMAIL=${{ secrets.DEFAULT_FROM_EMAIL }}
-REDIS_URL=${{ secrets.REDIS_URL }}
-CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}
-CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}
-CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}
-RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
-RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
-ENVEOF
+            printf '%s\n' \
+              "SECRET_KEY=${{ secrets.SECRET_KEY }}" \
+              "DEBUG=0" \
+              "ALLOWED_HOSTS=${{ secrets.ALLOWED_HOSTS }}" \
+              "CSRF_TRUSTED_ORIGINS=${{ secrets.CSRF_TRUSTED_ORIGINS }}" \
+              "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
+              "FRONTEND_URL=${{ secrets.FRONTEND_URL }}" \
+              "EMAIL_HOST=${{ secrets.EMAIL_HOST }}" \
+              "EMAIL_PORT=${{ secrets.EMAIL_PORT }}" \
+              "EMAIL_USE_TLS=${{ secrets.EMAIL_USE_TLS }}" \
+              "EMAIL_HOST_USER=${{ secrets.EMAIL_HOST_USER }}" \
+              "EMAIL_HOST_PASSWORD=${{ secrets.EMAIL_HOST_PASSWORD }}" \
+              "DEFAULT_FROM_EMAIL=${{ secrets.DEFAULT_FROM_EMAIL }}" \
+              "REDIS_URL=${{ secrets.REDIS_URL }}" \
+              "CLOUDINARY_CLOUD_NAME=${{ secrets.CLOUDINARY_CLOUD_NAME }}" \
+              "CLOUDINARY_API_KEY=${{ secrets.CLOUDINARY_API_KEY }}" \
+              "CLOUDINARY_API_SECRET=${{ secrets.CLOUDINARY_API_SECRET }}" \
+              "RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}" \
+              "RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}" \
+              > "$DEPLOY_DIR/.env.prod"
 
             # Verify env file
             if [ ! -s "$DEPLOY_DIR/.env.prod" ]; then
